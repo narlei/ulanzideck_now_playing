@@ -1,0 +1,8 @@
+.DS_Store
+*.ulanziPlugin.zip
+node_modules/
+dist/
+ulanzi_plugin_example/
+
+# Intermediate store art — `make banners` regenerates these on the way to the PNGs
+resources/*.svg

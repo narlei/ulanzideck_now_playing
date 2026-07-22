@@ -1,0 +1,16 @@
+{
+  "cover": "resources/cover.png",
+  "screenshots": [
+    "resources/cover.png",
+    "resources/banner1.png",
+    "resources/banner2.png"
+  ],
+  "longDescription": "Now Playing turns an Ulanzi Deck key into a miniature music display. The album cover fills the button, the track title and artist sit on top of it, and a progress bar across the bottom fills as the song plays — so a glance at the deck tells you what's on and how much of it is left. It reads Spotify and Apple Music directly on your Mac, with an \"Auto\" mode that follows whichever one is actually playing. A click can play/pause, skip forward, or jump back, and paused tracks are dimmed with a pause badge so the state is never ambiguous. Nothing is ever launched behind your back: if both players are closed, the button simply says so.",
+  "deviceTypes": [
+    "deck"
+  ],
+  "tags": [
+    "media",
+    "creator"
+  ]
+}

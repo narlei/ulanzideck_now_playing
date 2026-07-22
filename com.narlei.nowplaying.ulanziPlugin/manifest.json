@@ -1,0 +1,42 @@
+{
+  "Author": "Narlei Moreira",
+  "Name": "Now Playing",
+  "Description": "Shows the song playing right now on Spotify or Apple Music — album cover, title, artist and a progress bar — right on your Ulanzi Deck button. Click to play/pause or skip.",
+  "Icon": "resources/icon.png",
+  "Version": "1.0.0",
+  "Category": "Now Playing",
+  "CategoryIcon": "resources/icon.png",
+  "CodePath": "plugin/app.js",
+  "Type": "JavaScript",
+  "PrivateAPI": true,
+  "SupportedInMultiActions": false,
+  "UUID": "com.narlei.nowplaying.plugin",
+  "URL": "https://github.com/narlei/ulanzideck_now_playing",
+  "Actions": [
+    {
+      "Name": "Now Playing",
+      "Tooltip": "Album cover, track title, artist and playback progress for Spotify or Apple Music.",
+      "Icon": "resources/icon.png",
+      "PropertyInspectorPath": "property-inspector/inspector.html",
+      "UUID": "com.narlei.nowplaying.plugin.track",
+      "States": [
+        {
+          "Image": "resources/icon.png"
+        }
+      ],
+      "SupportedInMultiActions": false,
+      "Controllers": [
+        "Keypad"
+      ]
+    }
+  ],
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.15"
+    }
+  ],
+  "Software": {
+    "MinVersion": "3.0.11"
+  }
+}

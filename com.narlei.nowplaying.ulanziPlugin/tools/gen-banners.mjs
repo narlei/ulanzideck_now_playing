@@ -214,7 +214,7 @@ function buildBanner1() {
   s += txt('song plays. A click pauses it or skips.', lx, 886, 42, { fill: '#aeb6c6', weight: 500 });
 
   s += checkItem(lx, 1130, 'Real cover art, straight from the player');
-  s += checkItem(lx, 1230, 'Live progress and elapsed time');
+  s += checkItem(lx, 1230, 'Live progress bar and elapsed time');
   s += checkItem(lx, 1330, 'Reads Spotify and Apple Music');
 
   const cards = [

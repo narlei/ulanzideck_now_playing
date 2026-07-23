@@ -1,11 +1,15 @@
 import UlanziApi from './plugin-common-node/index.js';
 import { readNowPlaying, sendCommand, SOURCES } from './players.js';
 import { getArtwork } from './artwork.js';
-import { renderTrack, renderIdle, renderNotRunning, renderError } from './renderer.js';
+import { renderTrack, renderIdle, renderNotRunning, renderError, needsMarquee } from './renderer.js';
 
 const PLUGIN_UUID = 'com.narlei.nowplaying.plugin';
 const TICK_PLAYING_MS = 1000;
 const TICK_IDLE_MS = 3000;
+// Scrolling text is drawn frame by frame here rather than animated by the deck,
+// so it needs its own timer. This one only redraws from the cached snapshot —
+// it never polls the player.
+const MARQUEE_FRAME_MS = 100;
 
 const $UD = new UlanziApi();
 const INSTANCES = new Map();
@@ -16,6 +20,7 @@ const SNAPSHOTS = new Map();
 let tickTimer = null;
 let tickMs = 0;
 let polling = false;
+let frameTimer = null;
 
 function log(...args) {
   console.log('[now-playing]', ...args);
@@ -71,6 +76,38 @@ function renderAll() {
   for (const inst of INSTANCES.values()) {
     if (inst.active) renderForInstance(inst);
   }
+  scheduleFrames();
+}
+
+// True only while some visible button is actually scrolling its text. Anything
+// that fits is left on the 1s tick, so the fast timer costs nothing in the
+// common case.
+function anyMarquee() {
+  for (const inst of INSTANCES.values()) {
+    if (!inst.active) continue;
+    const s = settingsOf(inst);
+    const snap = SNAPSHOTS.get(s.source);
+    if (!snap || snap.status !== 'playing') continue;
+    if (needsMarquee({ title: snap.title, artist: snap.artist, showText: s.showText !== 'off' })) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function scheduleFrames() {
+  const wanted = anyMarquee();
+  if (wanted === !!frameTimer) return;
+  if (!wanted) {
+    clearInterval(frameTimer);
+    frameTimer = null;
+    return;
+  }
+  frameTimer = setInterval(() => {
+    for (const inst of INSTANCES.values()) {
+      if (inst.active) renderForInstance(inst);
+    }
+  }, MARQUEE_FRAME_MS);
 }
 
 function neededSources() {
@@ -130,6 +167,8 @@ function stopTicking() {
   if (tickTimer) clearInterval(tickTimer);
   tickTimer = null;
   tickMs = 0;
+  if (frameTimer) clearInterval(frameTimer);
+  frameTimer = null;
 }
 
 function syncPolling() {

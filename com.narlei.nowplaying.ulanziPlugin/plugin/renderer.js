@@ -21,6 +21,27 @@ const PANEL_OPACITY = 0.55;
 const PANEL_OPACITY_BOTTOM = 0.72;
 // Height of the soft fade above the text, in px.
 const PANEL_FADE = 26;
+// Thickness of the progress bar, which runs along the top edge.
+const BAR_HEIGHT = 9;
+// Baseline of the elapsed/duration row, which sits just under the bar.
+const TIME_Y = 31;
+const TIME_SIZE = 17;
+
+// Marquee, for text that overflows even at the smallest step. Verified on the
+// hardware: the deck's renderer honours both <clipPath> and SMIL, so a
+// scrolling title costs one frame instead of a stream of them.
+// How fast the text slides, in px per second. Slow enough to read.
+const MARQUEE_SPEED = 34;
+// Dwell at each end before turning around, so both the start and the end of the
+// title can actually be read.
+const MARQUEE_PAUSE_MS = 1400;
+// A few px past the overflow, so the last glyph clears the edge instead of
+// sitting flush against it.
+const MARQUEE_TAIL = 4;
+// Shared with needsMarquee, so the decision to animate uses the same ladder the
+// drawing does.
+const TITLE_SIZES = [27, 25, 23, 21, 19];
+const ARTIST_SIZES = [21, 20, 19, 18, 17];
 
 function escapeXml(s) {
   return String(s)
@@ -95,16 +116,16 @@ function fitText(text, fontSize, maxWidth = SIZE - TEXT_MARGIN * 2) {
   return `${out.trimEnd()}…`;
 }
 
-// Long titles look better one or two points smaller than chopped with an
-// ellipsis, so step the size down first and only truncate once the smallest
-// size still overflows.
-function autoFit(str, sizes, maxWidth) {
+// Long titles look better one or two points smaller than scrolled, so step the
+// size down first and only report an overflow once the smallest size still
+// doesn't fit. Nothing is ever truncated here — the caller scrolls instead.
+function autoFitScroll(str, sizes, maxWidth) {
   const s = String(str || '');
   for (const size of sizes) {
-    if (measure(s, size) <= maxWidth) return { text: s, size };
+    if (measure(s, size) <= maxWidth) return { text: s, size, overflow: 0 };
   }
   const size = sizes[sizes.length - 1];
-  return { text: fitText(s, size, maxWidth), size };
+  return { text: s, size, overflow: measure(s, size) - maxWidth };
 }
 
 // Drawn twice: an offset black copy underneath, then the real one. Cheap, and
@@ -118,6 +139,72 @@ function text(str, { x = SIZE / 2, y, size, weight = '700', fill = TEXT, anchor 
   );
 }
 
+// One full there-and-back cycle as (time, offset) breakpoints: dwell, slide out,
+// dwell, slide back.
+function marqueeCycle(travel, travelMs) {
+  return [
+    [0, 0],
+    [MARQUEE_PAUSE_MS, 0],
+    [MARQUEE_PAUSE_MS + travelMs, -travel],
+    [2 * MARQUEE_PAUSE_MS + travelMs, -travel],
+    [2 * (MARQUEE_PAUSE_MS + travelMs), 0],
+  ];
+}
+
+function offsetAt(cycle, t) {
+  for (let i = 1; i < cycle.length; i++) {
+    const [t0, v0] = cycle[i - 1];
+    const [t1, v1] = cycle[i];
+    if (t <= t1) {
+      const span = t1 - t0;
+      return span === 0 ? v1 : v0 + ((v1 - v0) * (t - t0)) / span;
+    }
+  }
+  return cycle[cycle.length - 1][1];
+}
+
+// Every frame is a still picture and the plugin sends a new one several times a
+// second — see MARQUEE_FRAME_MS in app.js.
+//
+// This started out as an SVG animation, which would have cost a single frame
+// for the whole scroll. The hardware said otherwise, in three rounds: a
+// negative `begin` was ignored, `keyTimes` looked ignored too, and even with
+// neither of them the text still stepped instead of running. Whatever the deck
+// does with a SMIL timeline, it isn't a smooth clock. Drawing each position
+// ourselves depends on nothing but <clipPath>, which the hardware did confirm.
+function marqueeText(str, { y, size, weight, fill, overflow, id }) {
+  const travel = overflow + MARQUEE_TAIL;
+  const travelMs = (travel / MARQUEE_SPEED) * 1000;
+  const cycle = marqueeCycle(travel, travelMs);
+  const totalMs = cycle[cycle.length - 1][0];
+  const offset = offsetAt(cycle, Date.now() % totalMs);
+  const win = `<rect x="${TEXT_MARGIN}" y="${y - size}" width="${SIZE - TEXT_MARGIN * 2}" height="${size * 1.35}"/>`;
+
+  return (
+    `<defs><clipPath id="${id}">${win}</clipPath></defs>` +
+    `<g clip-path="url(#${id})">` +
+    text(str, { x: TEXT_MARGIN + offset, y, size, weight, fill, anchor: 'start' }) +
+    `</g>`
+  );
+}
+
+// Whether this track's text needs animating at all, so the caller can run the
+// fast frame timer only while something is actually scrolling.
+export function needsMarquee({ title, artist, showText }) {
+  if (!showText) return false;
+  const w = SIZE - TEXT_MARGIN * 2;
+  return (
+    autoFitScroll(title || 'Unknown track', TITLE_SIZES, w).overflow > 0 ||
+    autoFitScroll(artist || '', ARTIST_SIZES, w).overflow > 0
+  );
+}
+
+// Centred when it fits, scrolling when it doesn't.
+function textLine(fit, opts) {
+  if (!fit.overflow) return text(fit.text, { ...opts, size: fit.size });
+  return marqueeText(fit.text, { ...opts, size: fit.size, overflow: fit.overflow });
+}
+
 export function formatTime(ms) {
   const total = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(total / 60);
@@ -129,7 +216,7 @@ function artLayer(artDataUrl, dim) {
   if (!artDataUrl) {
     return (
       `<rect x="0" y="0" width="${SIZE}" height="${SIZE}" fill="${BG}"/>` +
-      `<text x="${SIZE / 2}" y="96" font-size="62" text-anchor="middle" fill="#3a3a44">♫</text>`
+      `<text x="${SIZE / 2}" y="98" font-size="70" text-anchor="middle" fill="#3a3a44">♫</text>`
     );
   }
   return (
@@ -158,64 +245,77 @@ function textPanel(contentTopY) {
   );
 }
 
+// The bar sits at the very top of the button, so it needs its own scrim: on a
+// light cover the 28% white track would otherwise vanish. Short fade downwards
+// so it reads as a shadow under the bar rather than a band. When the time row
+// is on, the scrim has to reach past its baseline as well.
+function topScrim(withTimeRow) {
+  const height = withTimeRow ? TIME_Y + 8 : BAR_HEIGHT + 12;
+  const solidAt = Math.round(((withTimeRow ? TIME_Y : BAR_HEIGHT) / height) * 100);
+  return (
+    `<defs><linearGradient id="topScrim" x1="0" y1="0" x2="0" y2="1">` +
+    `<stop offset="0%" stop-color="${BLACK}" stop-opacity="${PANEL_OPACITY_BOTTOM}"/>` +
+    `<stop offset="${solidAt}%" stop-color="${BLACK}" stop-opacity="${PANEL_OPACITY}"/>` +
+    `<stop offset="100%" stop-color="${BLACK}" stop-opacity="0"/>` +
+    `</linearGradient></defs>` +
+    `<rect x="0" y="0" width="${SIZE}" height="${height}" fill="url(#topScrim)"/>`
+  );
+}
+
 function progressBar(ratio, y, color = ACCENT) {
   const clamped = Math.min(1, Math.max(0, ratio || 0));
   const w = Math.round(SIZE * clamped);
   return (
-    `<rect x="0" y="${y}" width="${SIZE}" height="7" fill="${TEXT}" fill-opacity="0.28"/>` +
-    (w > 0 ? `<rect x="0" y="${y}" width="${w}" height="7" fill="${color}"/>` : '')
+    `<rect x="0" y="${y}" width="${SIZE}" height="${BAR_HEIGHT}" fill="${TEXT}" fill-opacity="0.28"/>` +
+    (w > 0 ? `<rect x="0" y="${y}" width="${w}" height="${BAR_HEIGHT}" fill="${color}"/>` : '')
   );
 }
 
 function pauseBadge() {
   return (
-    `<circle cx="${SIZE / 2}" cy="78" r="27" fill="${BLACK}" fill-opacity="0.55"/>` +
-    `<rect x="${SIZE / 2 - 10}" y="64" width="7" height="28" rx="2" fill="${TEXT}"/>` +
-    `<rect x="${SIZE / 2 + 3}" y="64" width="7" height="28" rx="2" fill="${TEXT}"/>`
+    `<circle cx="${SIZE / 2}" cy="82" r="32" fill="${BLACK}" fill-opacity="0.55"/>` +
+    `<rect x="${SIZE / 2 - 12}" y="66" width="9" height="33" rx="2" fill="${TEXT}"/>` +
+    `<rect x="${SIZE / 2 + 3}" y="66" width="9" height="33" rx="2" fill="${TEXT}"/>`
   );
 }
 
 export function renderTrack({ title, artist, artDataUrl, positionMs, durationMs, playing, showText, showTime }) {
   const ratio = durationMs > 0 ? positionMs / durationMs : 0;
-  const barY = SIZE - 7;
+  const timeRow = showTime && durationMs > 0;
   const parts = [artLayer(artDataUrl, !playing)];
 
   if (!playing) parts.push(pauseBadge());
 
   if (showText) {
-    const timeRow = showTime && durationMs > 0;
-    const artistY = timeRow ? 156 : 168;
-    const titleY = artistY - 24;
+    const artistY = 178;
+    const titleY = artistY - 32;
     const w = SIZE - TEXT_MARGIN * 2;
-    const t = autoFit(title || 'Unknown track', [19, 18, 17, 16, 15], w);
-    const a = autoFit(artist || '', [15, 14, 13, 12], w);
+    const t = autoFitScroll(title || 'Unknown track', TITLE_SIZES, w);
+    const a = autoFitScroll(artist || '', ARTIST_SIZES, w);
 
     // Track the title's actual cap height rather than assume fixed bounds — it
     // shrinks a couple of points on long names, and the panel follows it.
     const panelTop = titleY - t.size * 0.8 - 7;
     parts.push(textPanel(panelTop));
-    parts.push(text(t.text, { y: titleY, size: t.size, weight: '700' }));
-    parts.push(text(a.text, { y: artistY, size: a.size, weight: '600', fill: MUTED }));
-    if (timeRow) {
-      parts.push(text(formatTime(positionMs), { x: 8, y: 182, size: 13, weight: '600', fill: MUTED, anchor: 'start' }));
-      parts.push(text(formatTime(durationMs), { x: SIZE - 8, y: 182, size: 13, weight: '600', fill: MUTED, anchor: 'end' }));
-    }
-  } else {
-    // Cover-only mode still needs something under the bar, or the 28% white
-    // track disappears against a light album cover.
-    parts.push(textPanel(barY));
+    parts.push(textLine(t, { y: titleY, weight: '700', id: 'mqTitle' }));
+    parts.push(textLine(a, { y: artistY, weight: '600', fill: MUTED, id: 'mqArtist' }));
   }
 
-  parts.push(progressBar(ratio, barY, playing ? ACCENT : MUTED));
+  parts.push(topScrim(timeRow));
+  parts.push(progressBar(ratio, 0, playing ? ACCENT : MUTED));
+  if (timeRow) {
+    parts.push(text(formatTime(positionMs), { x: 8, y: TIME_Y, size: TIME_SIZE, weight: '600', fill: MUTED, anchor: 'start' }));
+    parts.push(text(formatTime(durationMs), { x: SIZE - 8, y: TIME_Y, size: TIME_SIZE, weight: '600', fill: MUTED, anchor: 'end' }));
+  }
   return toDataUrl(svgDoc(parts.join('')));
 }
 
 function renderMessage({ icon, line1, line2 }) {
   const body = [
     `<rect x="0" y="0" width="${SIZE}" height="${SIZE}" fill="${BG}"/>`,
-    icon ? `<text x="${SIZE / 2}" y="94" font-size="58" text-anchor="middle" fill="#4a4a55">${escapeXml(icon)}</text>` : '',
-    line1 ? text(fitText(line1, 22), { y: 140, size: 22, weight: '700' }) : '',
-    line2 ? text(fitText(line2, 16), { y: 168, size: 16, weight: '600', fill: MUTED }) : '',
+    icon ? `<text x="${SIZE / 2}" y="92" font-size="66" text-anchor="middle" fill="#4a4a55">${escapeXml(icon)}</text>` : '',
+    line1 ? text(fitText(line1, 27), { y: 142, size: 27, weight: '700' }) : '',
+    line2 ? text(fitText(line2, 20), { y: 174, size: 20, weight: '600', fill: MUTED }) : '',
   ].join('');
   return toDataUrl(svgDoc(body));
 }

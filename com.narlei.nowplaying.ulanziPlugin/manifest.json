@@ -3,7 +3,7 @@
   "Name": "Now Playing",
   "Description": "Shows the song playing right now on Spotify or Apple Music — album cover, title, artist and a progress bar — right on your Ulanzi Deck button. Click to play/pause or skip.",
   "Icon": "resources/icon.png",
-  "Version": "1.0.1",
+  "Version": "1.0.2",
   "Category": "Now Playing",
   "CategoryIcon": "resources/icon.png",
   "CodePath": "plugin/app.js",

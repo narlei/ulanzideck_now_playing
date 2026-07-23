@@ -23,6 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Resolve version from manifest
         id: meta
         run: |
@@ -52,6 +56,11 @@ jobs:
           for dir in *.ulanziPlugin; do
             [ -d "$dir" ] || continue
             echo "Packaging $dir"
+            # node_modules/ is gitignored, so the checkout has none — the plugin
+            # host runs plain `node app.js` with no install step, so the runtime
+            # deps (ws) must be bundled or the plugin dies on first import.
+            (cd "$dir" && npm ci --omit=dev --no-audit --no-fund)
+            [ -d "$dir/node_modules/ws" ] || { echo "ws missing from $dir/node_modules" >&2; exit 1; }
             zip -r "${dir}.zip" "$dir" -x "*.DS_Store"
             found=1
           done

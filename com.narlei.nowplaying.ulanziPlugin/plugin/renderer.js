@@ -32,12 +32,11 @@ const TIME_SIZE = 17;
 // scrolling title costs one frame instead of a stream of them.
 // How fast the text slides, in px per second. Slow enough to read.
 const MARQUEE_SPEED = 34;
-// Dwell at each end before turning around, so both the start and the end of the
-// title can actually be read.
-const MARQUEE_PAUSE_MS = 1400;
-// A few px past the overflow, so the last glyph clears the edge instead of
-// sitting flush against it.
-const MARQUEE_TAIL = 4;
+// Short dwell at the top of each lap so the start of the title can be read
+// before it moves. Kept brief — a long pause reads as a stall, not a rest.
+const MARQUEE_LEAD_MS = 900;
+// Blank space between the end of the text and the repeated copy chasing it.
+const MARQUEE_GAP = 40;
 // Shared with needsMarquee, so the decision to animate uses the same ladder the
 // drawing does.
 const TITLE_SIZES = [27, 25, 23, 21, 19];
@@ -139,30 +138,6 @@ function text(str, { x = SIZE / 2, y, size, weight = '700', fill = TEXT, anchor 
   );
 }
 
-// One full there-and-back cycle as (time, offset) breakpoints: dwell, slide out,
-// dwell, slide back.
-function marqueeCycle(travel, travelMs) {
-  return [
-    [0, 0],
-    [MARQUEE_PAUSE_MS, 0],
-    [MARQUEE_PAUSE_MS + travelMs, -travel],
-    [2 * MARQUEE_PAUSE_MS + travelMs, -travel],
-    [2 * (MARQUEE_PAUSE_MS + travelMs), 0],
-  ];
-}
-
-function offsetAt(cycle, t) {
-  for (let i = 1; i < cycle.length; i++) {
-    const [t0, v0] = cycle[i - 1];
-    const [t1, v1] = cycle[i];
-    if (t <= t1) {
-      const span = t1 - t0;
-      return span === 0 ? v1 : v0 + ((v1 - v0) * (t - t0)) / span;
-    }
-  }
-  return cycle[cycle.length - 1][1];
-}
-
 // Every frame is a still picture and the plugin sends a new one several times a
 // second — see MARQUEE_FRAME_MS in app.js.
 //
@@ -172,18 +147,32 @@ function offsetAt(cycle, t) {
 // neither of them the text still stepped instead of running. Whatever the deck
 // does with a SMIL timeline, it isn't a smooth clock. Drawing each position
 // ourselves depends on nothing but <clipPath>, which the hardware did confirm.
-function marqueeText(str, { y, size, weight, fill, overflow, id }) {
-  const travel = overflow + MARQUEE_TAIL;
-  const travelMs = (travel / MARQUEE_SPEED) * 1000;
-  const cycle = marqueeCycle(travel, travelMs);
-  const totalMs = cycle[cycle.length - 1][0];
-  const offset = offsetAt(cycle, Date.now() % totalMs);
+//
+// The scroll runs one way and wraps, rather than sliding out and back: a
+// there-and-back cycle spends most of its length parked at one end or the other
+// and then reverses, which on a key this size reads as jerking rather than
+// scrolling. A second copy of the text follows a gap behind the first, so when
+// the run wraps the picture is already identical and nothing visibly snaps.
+//
+// `nowMs` is passed in rather than read here so every line on a key shares one
+// clock and they stay in phase across a frame.
+function marqueeText(str, { y, size, weight, fill, id, nowMs }) {
+  // One lap moves the text by its own width plus the gap — at which point the
+  // trailing copy sits exactly where the leading one started.
+  const span = measure(str, size) + MARQUEE_GAP;
+  const lapMs = (span / MARQUEE_SPEED) * 1000;
+  const t = nowMs % (MARQUEE_LEAD_MS + lapMs);
+  const offset = t <= MARQUEE_LEAD_MS
+    ? 0
+    : -((t - MARQUEE_LEAD_MS) / 1000) * MARQUEE_SPEED;
   const win = `<rect x="${TEXT_MARGIN}" y="${y - size}" width="${SIZE - TEXT_MARGIN * 2}" height="${size * 1.35}"/>`;
+  const draw = (x) => text(str, { x, y, size, weight, fill, anchor: 'start' });
 
   return (
     `<defs><clipPath id="${id}">${win}</clipPath></defs>` +
     `<g clip-path="url(#${id})">` +
-    text(str, { x: TEXT_MARGIN + offset, y, size, weight, fill, anchor: 'start' }) +
+    draw(TEXT_MARGIN + offset) +
+    draw(TEXT_MARGIN + offset + span) +
     `</g>`
   );
 }
@@ -202,7 +191,7 @@ export function needsMarquee({ title, artist, showText }) {
 // Centred when it fits, scrolling when it doesn't.
 function textLine(fit, opts) {
   if (!fit.overflow) return text(fit.text, { ...opts, size: fit.size });
-  return marqueeText(fit.text, { ...opts, size: fit.size, overflow: fit.overflow });
+  return marqueeText(fit.text, { ...opts, size: fit.size });
 }
 
 export function formatTime(ms) {
@@ -279,7 +268,7 @@ function pauseBadge() {
   );
 }
 
-export function renderTrack({ title, artist, artDataUrl, positionMs, durationMs, playing, showText, showTime }) {
+export function renderTrack({ title, artist, artDataUrl, positionMs, durationMs, playing, showText, showTime, nowMs = Date.now() }) {
   const ratio = durationMs > 0 ? positionMs / durationMs : 0;
   const timeRow = showTime && durationMs > 0;
   const parts = [artLayer(artDataUrl, !playing)];
@@ -297,8 +286,13 @@ export function renderTrack({ title, artist, artDataUrl, positionMs, durationMs,
     // shrinks a couple of points on long names, and the panel follows it.
     const panelTop = titleY - t.size * 0.8 - 7;
     parts.push(textPanel(panelTop));
-    parts.push(textLine(t, { y: titleY, weight: '700', id: 'mqTitle' }));
-    parts.push(textLine(a, { y: artistY, weight: '600', fill: MUTED, id: 'mqArtist' }));
+    // Only a playing track scrolls, so a paused one has to be pinned to the
+    // start of the cycle rather than to the clock. Left on the clock it still
+    // moved — just sampled once per idle tick, which came out as the text
+    // sitting dead still and then jumping several seconds' worth at a time.
+    const clock = playing ? nowMs : 0;
+    parts.push(textLine(t, { y: titleY, weight: '700', id: 'mqTitle', nowMs: clock }));
+    parts.push(textLine(a, { y: artistY, weight: '600', fill: MUTED, id: 'mqArtist', nowMs: clock }));
   }
 
   parts.push(topScrim(timeRow));

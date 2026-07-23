@@ -4,11 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 
 // The deck receives the whole button image as a base64 data URL on every
-// repaint (once a second while playing), so the cover is downscaled hard before
-// it is embedded. 180px still looks sharp on the key and keeps a frame around
-// 12-16 KB instead of the 120 KB+ Spotify serves.
+// repaint — and while a long title is scrolling that is many times a second,
+// not once. The cover dominates that payload, so it is squeezed hard before it
+// is embedded.
+//
+// Resolution is what the eye reads on a key this size, and compression is what
+// costs bytes, so the trade goes to quality rather than to pixels: at 180px the
+// key is still rendering close to 1:1, while dropping quality from 70 to 45
+// roughly halves the frame. Downscaling instead would have saved the same bytes
+// and looked visibly soft.
 const ART_PX = 180;
-const ART_QUALITY = 70;
+const ART_QUALITY = 45;
 const CACHE_LIMIT = 8;
 
 const TMP_DIR = path.join(os.tmpdir(), 'ulanzi-now-playing');

@@ -181,13 +181,11 @@ export default class UlanziApi extends EventEmitter {
    * @param {object} params
    */
   send(cmd, params) {
-    console.warn(`[ULANZIDECK] send:  ${JSON.stringify({
-          cmd,
-          uuid: this.uuid,
-          key: this.key,
-          actionid: this.actionid,
-          ...params,
-        })}`);
+    // A button icon is a base64 data URL tens of KB long, and this runs on every
+    // repaint. Stringifying and writing all of it to stdout is a synchronous
+    // pipe write that stalls the event loop — at marquee frame rates it was the
+    // single biggest source of animation stutter. Log the shape, not the bytes.
+    console.warn(`[ULANZIDECK] send: ${cmd}`);
     this.websocket && this.websocket.readyState === WebSocket.OPEN &&
       this.websocket.send(
         JSON.stringify({

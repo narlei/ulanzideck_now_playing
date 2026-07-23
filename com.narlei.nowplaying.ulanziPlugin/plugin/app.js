@@ -8,8 +8,19 @@ const TICK_PLAYING_MS = 1000;
 const TICK_IDLE_MS = 3000;
 // Scrolling text is drawn frame by frame here rather than animated by the deck,
 // so it needs its own timer. This one only redraws from the cached snapshot —
-// it never polls the player.
-const MARQUEE_FRAME_MS = 100;
+// it never polls the player. At MARQUEE_SPEED that works out to ~2px of travel
+// per frame, which is the point where the steps stop being visible as steps.
+// It is an upper bound, not a promise — see the high-water mark below.
+const MARQUEE_FRAME_MS = 60;
+// A track frame is ~32KB of base64, most of it the cover art, and the deck has
+// to decode, parse, rasterize and push it to the key over USB before it can
+// take the next one. That is much slower than the frame timer, and `ws` queues
+// whatever we hand it: offering frames faster than the socket drains built an
+// unbounded backlog, so what the key showed was seconds behind and arrived in
+// bursts — the freeze-then-jump. Skipping a frame is free; queueing one is not.
+const SOCKET_HIGH_WATER = 48 * 1024;
+// How often to report the rate the deck is actually sustaining.
+const MARQUEE_STATS_MS = 10000;
 
 const $UD = new UlanziApi();
 const INSTANCES = new Map();
@@ -21,6 +32,16 @@ let tickTimer = null;
 let tickMs = 0;
 let polling = false;
 let frameTimer = null;
+let frames = 0;
+let dropped = 0;
+let statsAt = 0;
+
+// Unflushed bytes still sitting in the socket. Growing means the deck is behind
+// and anything we add now would be shown late rather than shown sooner.
+function socketBusy() {
+  const ws = $UD.websocket;
+  return !!ws && ws.bufferedAmount > SOCKET_HIGH_WATER;
+}
 
 function log(...args) {
   console.log('[now-playing]', ...args);
@@ -39,7 +60,10 @@ function sourceLabel(sourceId) {
   return SOURCES[sourceId]?.label || sourceId;
 }
 
-function renderForInstance(inst) {
+// `nowMs` is threaded through so that every key repainted in the same frame
+// scrolls from the same clock reading, instead of each one sampling Date.now()
+// a few milliseconds apart and drifting out of step.
+function renderForInstance(inst, nowMs = Date.now()) {
   const s = settingsOf(inst);
   const snap = SNAPSHOTS.get(s.source);
 
@@ -69,28 +93,31 @@ function renderForInstance(inst) {
     playing: snap.playing,
     showText: s.showText !== 'off',
     showTime: s.showTime !== 'off',
+    nowMs,
   }));
 }
 
 function renderAll() {
+  const nowMs = Date.now();
   for (const inst of INSTANCES.values()) {
-    if (inst.active) renderForInstance(inst);
+    if (inst.active) renderForInstance(inst, nowMs);
   }
   scheduleFrames();
 }
 
-// True only while some visible button is actually scrolling its text. Anything
-// that fits is left on the 1s tick, so the fast timer costs nothing in the
-// common case.
+// Whether this particular button has text long enough to scroll. Anything that
+// fits stays on the 1s tick, so the fast timer costs nothing in the common case.
+function instMarquees(inst) {
+  if (!inst.active) return false;
+  const s = settingsOf(inst);
+  const snap = SNAPSHOTS.get(s.source);
+  if (!snap || snap.status !== 'playing') return false;
+  return needsMarquee({ title: snap.title, artist: snap.artist, showText: s.showText !== 'off' });
+}
+
 function anyMarquee() {
   for (const inst of INSTANCES.values()) {
-    if (!inst.active) continue;
-    const s = settingsOf(inst);
-    const snap = SNAPSHOTS.get(s.source);
-    if (!snap || snap.status !== 'playing') continue;
-    if (needsMarquee({ title: snap.title, artist: snap.artist, showText: s.showText !== 'off' })) {
-      return true;
-    }
+    if (instMarquees(inst)) return true;
   }
   return false;
 }
@@ -103,9 +130,36 @@ function scheduleFrames() {
     frameTimer = null;
     return;
   }
+  frames = 0;
+  dropped = 0;
+  statsAt = Date.now();
   frameTimer = setInterval(() => {
+    // Backpressure first: if the previous frame hasn't even left the socket,
+    // drawing another one only makes the backlog worse. The offset is computed
+    // from the wall clock, so a skipped frame costs nothing but smoothness —
+    // the next one drawn is at the position it should be at, not the next in
+    // some sequence. The marquee therefore settles at whatever rate the deck
+    // can genuinely sustain, evenly, instead of galloping and stalling.
+    if (socketBusy()) {
+      dropped++;
+      return;
+    }
+
+    // Only the keys that are actually scrolling. Repainting a static key 16
+    // times a second buys nothing and every repaint pushes a full-size icon
+    // down the socket, which is what the scrolling keys are competing for.
+    const nowMs = Date.now();
     for (const inst of INSTANCES.values()) {
-      if (inst.active) renderForInstance(inst);
+      if (instMarquees(inst)) renderForInstance(inst, nowMs);
+    }
+    frames++;
+
+    const elapsed = nowMs - statsAt;
+    if (elapsed >= MARQUEE_STATS_MS) {
+      log(`marquee ${(frames / (elapsed / 1000)).toFixed(1)} fps, ${dropped} frames dropped to backpressure`);
+      frames = 0;
+      dropped = 0;
+      statsAt = nowMs;
     }
   }, MARQUEE_FRAME_MS);
 }

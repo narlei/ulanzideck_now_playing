@@ -1,6 +1,6 @@
 {
   "name": "now-playing",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Ulanzi Deck plugin that shows the currently playing Spotify / Apple Music track with album cover, title, artist and a playback progress bar.",
   "author": "Narlei Moreira",
   "license": "MIT",

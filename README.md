@@ -75,6 +75,20 @@ Open the button's settings:
 
 ---
 
+## System Volume
+
+A second button, **System Volume**, shows the Mac's output volume — the whole key fills up as the volume rises, so you can watch it climb while you turn it up.
+
+It follows the system, not just its own clicks: the keyboard volume keys, another app, anything — the key catches up within about a tenth of a second. Above 75% the fill turns amber, above 95% red, and muting greys it out and crosses the speaker.
+
+- **On click** — `Mute / Unmute` (default), `Volume up`, `Volume down`, or `Do nothing`.
+- **Step** — how much one click of up / down (or one detent of a dial) moves: 2%, `5%` (default), 10% or 15%.
+- **Percentage** — show the number, or leave the bar to speak for itself.
+
+On a device with a **dial**, turn it to change the volume and press it to mute.
+
+---
+
 ## Privacy
 
 - **No account, no login, no token.** Nothing to authorize, nothing stored.
@@ -85,6 +99,10 @@ Open the button's settings:
 ---
 
 ## How it works
+
+The volume is read a different way from the track. A cold `osascript` costs ~180ms to start, so polling it fast enough to watch the level move would spend more time forking than reading — instead one `osascript` is started once and **loops inside AppleScript**, printing each reading with `log` (which writes to stderr unbuffered, unlike `return`, which only fires when a script ends). One process, ten readings a second, 0.3% CPU. Frames are only sent when the reading actually changes.
+
+Dial ticks arrive far faster than `set volume` can be run, so the key is drawn at the new level immediately and the write is coalesced — otherwise the bar would jump backwards between ticks as each late write reported the level it had asked for a moment ago.
 
 Track data comes from AppleScript, polled once a second while something is playing and every three seconds when it isn't. Polling is **shared**: several keys watching the same player cost one AppleScript call per tick, not one each.
 
@@ -111,6 +129,8 @@ make install   # sync to UlanziDeck + restart Ulanzi Studio
 | `make restart` | Restart Ulanzi Studio only |
 | `make bump_patch` | Bump version (patch / minor / major) |
 
+Releases are automatic: when a `manifest.json` version bump lands on `main`, the workflow packages the plugin and publishes a GitHub Release. The body comes from the matching `## [x.y.z]` section of [CHANGELOG.md](CHANGELOG.md) — add the entry in the same commit as the bump, or the release goes out with an empty auto-generated body.
+
 To test without the desktop app, use the simulator bundled in `ulanzi_plugin_example/UlanziDeckSimulator`: copy the plugin folder into its `plugins/`, run `npm start` there, then start the main service with the arguments the simulator prints:
 
 ```bash
@@ -126,13 +146,16 @@ Set **加载action** (load action) to **是** in the simulator's right-hand pane
 ```
 com.narlei.nowplaying.ulanziPlugin/   # the plugin bundle
 ├── plugin/
-│   ├── app.js        # instance lifecycle, shared polling, click handling
-│   ├── players.js    # AppleScript access to Spotify / Apple Music
-│   ├── artwork.js    # cover fetch/extract, sips downscale, per-track cache
-│   └── renderer.js   # SVG button frames
-├── property-inspector/
-├── resources/        # icon.png
-└── tools/            # gen-icon.mjs, gen-banners.mjs
+│   ├── app.js               # instance lifecycle, shared polling, click handling
+│   ├── players.js           # AppleScript access to Spotify / Apple Music
+│   ├── artwork.js           # cover fetch/extract, sips downscale, per-track cache
+│   ├── volume.js            # streaming system-volume watcher + setters
+│   ├── svg.js               # shared SVG primitives and text measuring
+│   ├── renderer.js          # SVG frames for the track button
+│   └── volume-renderer.js   # SVG frames for the volume button
+├── property-inspector/      # inspector.html, volume.html, shared inspector.js
+├── resources/               # icon.png, icon-volume.png
+└── tools/                   # gen-icon.mjs, gen-banners.mjs
 ```
 
 Store art is generated from the **real** button renderer, so the mockups can't drift from what the plugin actually draws. The demo sleeves and track names are synthetic on purpose — shipping real album covers in marketing art would mean shipping someone else's copyrighted work.

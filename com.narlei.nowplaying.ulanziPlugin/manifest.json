@@ -1,9 +1,9 @@
 {
   "Author": "Narlei Moreira",
   "Name": "Now Playing",
-  "Description": "Shows the song playing right now on Spotify or Apple Music — album cover, title, artist and a progress bar — right on your Ulanzi Deck button. Click to play/pause or skip.",
+  "Description": "Shows the song playing right now on Spotify or Apple Music — album cover, title, artist and a progress bar — right on your Ulanzi Deck button. Includes a live System Volume key that fills up as you turn the volume up.",
   "Icon": "resources/icon.png",
-  "Version": "1.0.2",
+  "Version": "1.1.0",
   "Category": "Now Playing",
   "CategoryIcon": "resources/icon.png",
   "CodePath": "plugin/app.js",
@@ -27,6 +27,23 @@
       "SupportedInMultiActions": false,
       "Controllers": [
         "Keypad"
+      ]
+    },
+    {
+      "Name": "System Volume",
+      "Tooltip": "Live macOS output volume: the key fills up as the volume rises. Click to mute, or to step it up or down.",
+      "Icon": "resources/icon-volume.png",
+      "PropertyInspectorPath": "property-inspector/volume.html",
+      "UUID": "com.narlei.nowplaying.plugin.volume",
+      "States": [
+        {
+          "Image": "resources/icon-volume.png"
+        }
+      ],
+      "SupportedInMultiActions": false,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
       ]
     }
   ],

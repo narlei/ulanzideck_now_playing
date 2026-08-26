@@ -1,13 +1,17 @@
-const DEFAULTS = { source: 'auto', clickAction: 'playPause', showText: 'on', showTime: 'on' };
-const FIELDS = Object.keys(DEFAULTS);
+// Shared by every action's inspector. The fields are whatever the form
+// declares, and each field's default is the option marked `selected` in the
+// HTML — so a new action only needs its own markup, not its own script.
+const els = Object.fromEntries(
+  [...document.querySelectorAll('#property-inspector [name]')].map((el) => [el.name, el]),
+);
+const FIELDS = Object.keys(els);
+const DEFAULTS = Object.fromEntries(FIELDS.map((f) => [f, els[f].value]));
 
 let settings = { ...DEFAULTS };
 let loaded = false;
 // Fingerprint of the last save this PI made, so the deck echoing it back through
 // didReceiveSettings doesn't reset the controls the user is still touching.
 let lastSent = null;
-
-const els = Object.fromEntries(FIELDS.map((f) => [f, document.getElementById(f)]));
 
 function fingerprint(obj) {
   return FIELDS.map((f) => obj[f]).join('|');

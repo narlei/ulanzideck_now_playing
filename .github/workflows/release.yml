@@ -69,15 +69,50 @@ jobs:
             exit 1
           fi
 
+      # Release notes come from CHANGELOG.md when it has a section for this
+      # version. Commits land straight on main here, so --generate-notes (which
+      # lists merged PRs) produces an empty body — it stays as the fallback for
+      # a version nobody wrote an entry for.
+      - name: Extract release notes from CHANGELOG.md
+        if: steps.check.outputs.exists == 'false'
+        id: notes
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if [ ! -f CHANGELOG.md ]; then
+            echo "No CHANGELOG.md — falling back to generated notes."
+            echo "file=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Everything between this version's heading and the next one.
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::warning::No CHANGELOG.md section for $VERSION — falling back to generated notes."
+            rm -f RELEASE_NOTES.md
+            echo "file=" >> "$GITHUB_OUTPUT"
+          else
+            echo "file=RELEASE_NOTES.md" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
         run: |
+          if [ -n "$NOTES_FILE" ]; then
+            notes_arg=(--notes-file "$NOTES_FILE")
+          else
+            notes_arg=(--generate-notes)
+          fi
           gh release create "v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --title "v$VERSION" \
-            --generate-notes \
+            "${notes_arg[@]}" \
             --latest \
             *.ulanziPlugin.zip

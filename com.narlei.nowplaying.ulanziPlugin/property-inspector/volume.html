@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,minimal-ui,viewport-fit=cover" />
+  <title>System Volume</title>
+  <link rel="stylesheet" href="../libs/css/uspi.css">
+  <style>
+    .panel { padding: 8px 12px; font-size: 12px; line-height: 1.5; }
+    .panel p { margin: 0 0 8px; opacity: 0.85; }
+    .panel .muted { opacity: 0.6; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div class="udpi-wrapper hidden uspi-wrapper">
+    <form id="property-inspector">
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="clickLabel">On click</div>
+        <select class="uspi-item-value" name="clickAction" id="clickAction">
+          <option value="mute" selected>Mute / Unmute</option>
+          <option value="up">Volume up</option>
+          <option value="down">Volume down</option>
+          <option value="none">Do nothing</option>
+        </select>
+      </div>
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="stepLabel">Step</div>
+        <select class="uspi-item-value" name="step" id="step">
+          <option value="2">2%</option>
+          <option value="5" selected>5%</option>
+          <option value="10">10%</option>
+          <option value="15">15%</option>
+        </select>
+      </div>
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="showPercentLabel">Percentage</div>
+        <select class="uspi-item-value" name="showPercent" id="showPercent">
+          <option value="on" selected>Show</option>
+          <option value="off">Hide (bar only)</option>
+        </select>
+      </div>
+
+      <div class="panel">
+        <p class="muted" data-localize="hint">The button fills up as the Mac's output volume rises, and follows it live — including when you change it with the keyboard keys or anywhere else.</p>
+        <p class="muted" data-localize="hintDial">On a dial, turning it adjusts the volume by the step above and pressing it mutes. "Step" also sets how much one click of Volume up / down moves.</p>
+      </div>
+    </form>
+  </div>
+
+  <script src="../libs/js/constants.js"></script>
+  <script src="../libs/js/eventEmitter.js"></script>
+  <script src="../libs/js/timers.js"></script>
+  <script src="../libs/js/utils.js"></script>
+  <script src="../libs/js/ulanziApi.js"></script>
+  <script src="./inspector.js"></script>
+</body>
+</html>

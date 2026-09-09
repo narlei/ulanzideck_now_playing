@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,minimal-ui,viewport-fit=cover" />
+  <title>Progress</title>
+  <link rel="stylesheet" href="../libs/css/uspi.css">
+  <style>
+    .panel { padding: 8px 12px; font-size: 12px; line-height: 1.5; }
+    .panel p { margin: 0 0 8px; opacity: 0.85; }
+    .panel .muted { opacity: 0.6; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div class="udpi-wrapper hidden uspi-wrapper">
+    <form id="property-inspector">
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="sourceLabel">Player</div>
+        <select class="uspi-item-value" name="source" id="source">
+          <option value="auto" selected>Auto (whatever is playing)</option>
+          <option value="spotify">Spotify</option>
+          <option value="music">Apple Music</option>
+        </select>
+      </div>
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="stepLabel">Seek step</div>
+        <select class="uspi-item-value" name="step" id="step">
+          <option value="5">5 seconds</option>
+          <option value="10" selected>10 seconds</option>
+          <option value="15">15 seconds</option>
+          <option value="30">30 seconds</option>
+          <option value="60">1 minute</option>
+        </select>
+      </div>
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="clickLabel">On click / dial press</div>
+        <select class="uspi-item-value" name="clickAction" id="clickAction">
+          <option value="playPause" selected>Play / Pause</option>
+          <option value="restart">Back to the start</option>
+          <option value="next">Next track</option>
+          <option value="previous">Previous track</option>
+          <option value="none">Do nothing</option>
+        </select>
+      </div>
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="backgroundLabel">Background</div>
+        <select class="uspi-item-value" name="background" id="background">
+          <option value="plain" selected>Plain</option>
+          <option value="cover">Album cover (dimmed)</option>
+        </select>
+      </div>
+
+      <div class="panel">
+        <p class="muted" data-localize="hint">The key draws a ring that fills as the song plays, with the elapsed time in the middle and the track length underneath.</p>
+        <p class="muted" data-localize="hintDial">On a dial, turning it jumps forward or back by the step above — the ring and the clock move with your hand and the player catches up. Press the dial for the click action.</p>
+      </div>
+    </form>
+  </div>
+
+  <script src="../libs/js/constants.js"></script>
+  <script src="../libs/js/eventEmitter.js"></script>
+  <script src="../libs/js/timers.js"></script>
+  <script src="../libs/js/utils.js"></script>
+  <script src="../libs/js/ulanziApi.js"></script>
+  <script src="./inspector.js"></script>
+</body>
+</html>

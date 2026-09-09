@@ -63,6 +63,31 @@ const volumeSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 288"
 </svg>
 `;
 
+// Action icon for the seek key: the ring the button itself draws, with the
+// arrows that say the dial moves it.
+const seekSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 288" width="288" height="288">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f2430"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="288" height="288" rx="56" fill="url(#bg)"/>
+
+  <circle cx="144" cy="144" r="92" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="20"/>
+  <path d="M144 52 A 92 92 0 0 1 223.67 190" fill="none" stroke="#1db954" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="223.67" cy="190" r="11" fill="#ffffff"/>
+
+  <!-- rewind / fast-forward, the pair the dial maps to -->
+  <g fill="#ffffff">
+    <path d="M132 112 L104 144 L132 176 Z"/>
+    <path d="M100 112 L72 144 L100 176 Z" fill-opacity="0.55"/>
+    <path d="M156 112 L184 144 L156 176 Z"/>
+    <path d="M188 112 L216 144 L188 176 Z" fill-opacity="0.55"/>
+  </g>
+</svg>
+`;
+
 function render(name, source) {
   const svgPath = path.join(OUT_DIR, `${name}.svg`);
   writeFileSync(svgPath, source);
@@ -74,3 +99,4 @@ function render(name, source) {
 
 render('icon', svg);
 render('icon-volume', volumeSvg);
+render('icon-seek', seekSvg);

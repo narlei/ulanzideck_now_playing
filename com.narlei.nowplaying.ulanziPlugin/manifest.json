@@ -1,9 +1,9 @@
 {
   "Author": "Narlei Moreira",
   "Name": "Now Playing",
-  "Description": "Shows the song playing right now on Spotify or Apple Music — album cover, title, artist and a progress bar — right on your Ulanzi Deck button. Includes a live System Volume key that fills up as you turn the volume up.",
+  "Description": "Shows the song playing right now on Spotify or Apple Music — album cover, title, artist and a progress bar — right on your Ulanzi Deck button. Adds a Progress ring you can seek with a dial, and a live Volume key that fills up as you turn the volume up.",
   "Icon": "resources/icon.png",
-  "Version": "1.1.0",
+  "Version": "1.2.0",
   "Category": "Now Playing",
   "CategoryIcon": "resources/icon.png",
   "CodePath": "plugin/app.js",
@@ -30,7 +30,24 @@
       ]
     },
     {
-      "Name": "System Volume",
+      "Name": "Progress",
+      "Tooltip": "A progress ring for the current track. On a dial, turn to jump forward or back.",
+      "Icon": "resources/icon-seek.png",
+      "PropertyInspectorPath": "property-inspector/seek.html",
+      "UUID": "com.narlei.nowplaying.plugin.seek",
+      "States": [
+        {
+          "Image": "resources/icon-seek.png"
+        }
+      ],
+      "SupportedInMultiActions": false,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ]
+    },
+    {
+      "Name": "Volume",
       "Tooltip": "Live macOS output volume: the key fills up as the volume rises. Click to mute, or to step it up or down.",
       "Icon": "resources/icon-volume.png",
       "PropertyInspectorPath": "property-inspector/volume.html",

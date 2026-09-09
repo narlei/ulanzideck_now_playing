@@ -75,9 +75,9 @@ Open the button's settings:
 
 ---
 
-## System Volume
+## Volume
 
-A second button, **System Volume**, shows the Mac's output volume — the whole key fills up as the volume rises, so you can watch it climb while you turn it up.
+A second button, **Volume**, shows the Mac's output volume — the whole key fills up as the volume rises, so you can watch it climb while you turn it up.
 
 It follows the system, not just its own clicks: the keyboard volume keys, another app, anything — the key catches up within about a tenth of a second. Above 75% the fill turns amber, above 95% red, and muting greys it out and crosses the speaker.
 
@@ -86,6 +86,21 @@ It follows the system, not just its own clicks: the keyboard volume keys, anothe
 - **Percentage** — show the number, or leave the bar to speak for itself.
 
 On a device with a **dial**, turn it to change the volume and press it to mute.
+
+---
+
+## Progress
+
+A third button, **Progress**, is the track's progress as a ring: it fills as the song plays, the elapsed time sits in the middle and the track length underneath. Paused turns the ring grey, and anything past an hour switches the clock to `1:02:05`.
+
+**On a device with a dial, turning it seeks.** One detent jumps forward or back by your step, and the ring and the clock move with your hand — the player catches up a fraction of a second later. A burst of detents is written once, not once per click, and the badge counts the whole burst (`+30s`, not `+10s` three times).
+
+- **Player** — `Auto` (default), `Spotify`, or `Apple Music`, same as the main key.
+- **Seek step** — how far one detent (or one click) jumps: 5s, `10s` (default), 15s, 30s, or 1 minute.
+- **On click / dial press** — `Play / Pause` (default), `Back to the start`, `Next track`, `Previous track`, or `Do nothing`.
+- **Background** — `Plain` (default), or the album cover dimmed behind the ring.
+
+Without a dial it still works as a plain key: it shows the progress and the click action runs on press.
 
 ---
 
@@ -103,6 +118,10 @@ On a device with a **dial**, turn it to change the volume and press it to mute.
 The volume is read a different way from the track. A cold `osascript` costs ~180ms to start, so polling it fast enough to watch the level move would spend more time forking than reading — instead one `osascript` is started once and **loops inside AppleScript**, printing each reading with `log` (which writes to stderr unbuffered, unlike `return`, which only fires when a script ends). One process, ten readings a second, 0.3% CPU. Frames are only sent when the reading actually changes.
 
 Dial ticks arrive far faster than `set volume` can be run, so the key is drawn at the new level immediately and the write is coalesced — otherwise the bar would jump backwards between ticks as each late write reported the level it had asked for a moment ago.
+
+**Seeking works the same way**, for the same reason: `set player position` is another ~200ms process start, so a dial detent only moves a local target and repaints. That target is an *anchor*, not a value — a playing track keeps moving while it is held, so it is advanced by the wall clock and re-anchored at the moment of the write, which is why the number the player is told and the number on the key are the same one. The player wins again as soon as it reports a position near the target, or after three seconds if the write silently failed.
+
+For the same reason every position on screen is advanced from its reading's own timestamp rather than shown raw: a poll that took 900ms to come back is describing a track that has already moved on, and during a marquee the same reading is redrawn a dozen times.
 
 Track data comes from AppleScript, polled once a second while something is playing and every three seconds when it isn't. Polling is **shared**: several keys watching the same player cost one AppleScript call per tick, not one each.
 
@@ -124,7 +143,7 @@ make install   # sync to UlanziDeck + restart Ulanzi Studio
 | Command | What it does |
 |---|---|
 | `make package` | Build distributable ZIP → `dist/` |
-| `make icon` | Regenerate `resources/icon.png` |
+| `make icon` | Regenerate the action icons in `resources/` |
 | `make banners` | Regenerate the store art in `resources/` |
 | `make restart` | Restart Ulanzi Studio only |
 | `make bump_patch` | Bump version (patch / minor / major) |

@@ -86,6 +86,30 @@ function fitText(text, fontSize, maxWidth = SIZE - TEXT_MARGIN * 2) {
   return `${out.trimEnd()}…`;
 }
 
+// Point on a circle, with 0 degrees at 12 o'clock and the angle running
+// clockwise — the direction a progress ring reads in.
+function polar(cx, cy, r, deg) {
+  const rad = ((deg - 90) * Math.PI) / 180;
+  return [round2(cx + r * Math.cos(rad)), round2(cy + r * Math.sin(rad))];
+}
+
+// An arc starting at 12 o'clock and sweeping clockwise. Built as an explicit
+// path rather than a dashed circle: stroke-dasharray is the usual way to draw a
+// progress ring, but the deck's renderer is SVG 1.1 taken literally (see the
+// note at the top of this file) and `A` is the one arc primitive already
+// confirmed on the hardware by the volume key's speaker icon.
+function arcPath(cx, cy, r, sweepDeg) {
+  // A full sweep puts the end point on top of the start, which draws nothing.
+  const sweep = Math.min(359.99, Math.max(0, sweepDeg));
+  const [x0, y0] = polar(cx, cy, r, 0);
+  const [x1, y1] = polar(cx, cy, r, sweep);
+  return `M${x0} ${y0} A ${r} ${r} 0 ${sweep > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+}
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
 // Drawn twice: an offset black copy underneath, then the real one. Cheap, and
 // unlike a stroke outline it needs no SVG2 features from the deck's renderer.
 function text(str, { x = SIZE / 2, y, size, weight = '700', fill = TEXT, anchor = 'middle' }) {
@@ -97,4 +121,4 @@ function text(str, { x = SIZE / 2, y, size, weight = '700', fill = TEXT, anchor 
   );
 }
 
-export { SIZE, BG, TEXT, MUTED, ACCENT, BLACK, TEXT_MARGIN, escapeXml, svgDoc, toDataUrl, glyphEm, measure, fitText, text };
+export { SIZE, BG, TEXT, MUTED, ACCENT, BLACK, TEXT_MARGIN, escapeXml, svgDoc, toDataUrl, glyphEm, measure, fitText, text, polar, arcPath };

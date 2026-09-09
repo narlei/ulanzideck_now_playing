@@ -1,12 +1,14 @@
 import UlanziApi from './plugin-common-node/index.js';
-import { readNowPlaying, sendCommand, SOURCES } from './players.js';
+import { readNowPlaying, sendCommand, seekTo, SOURCES } from './players.js';
 import { getArtwork } from './artwork.js';
 import { renderTrack, renderIdle, renderNotRunning, renderError, needsMarquee } from './renderer.js';
 import { renderVolume, renderVolumeUnknown } from './volume-renderer.js';
+import { renderSeek } from './seek-renderer.js';
 import { startVolumeWatch, stopVolumeWatch, setVolume, setMuted, clampLevel } from './volume.js';
 
 const PLUGIN_UUID = 'com.narlei.nowplaying.plugin';
 const ACTION_VOLUME = `${PLUGIN_UUID}.volume`;
+const ACTION_SEEK = `${PLUGIN_UUID}.seek`;
 const TICK_PLAYING_MS = 1000;
 const TICK_IDLE_MS = 3000;
 // Scrolling text is drawn frame by frame here rather than animated by the deck,
@@ -61,9 +63,26 @@ function isVolume(inst) {
   return inst.action === ACTION_VOLUME;
 }
 
+function isSeek(inst) {
+  return inst.action === ACTION_SEEK;
+}
+
+function isTrack(inst) {
+  return inst.action !== ACTION_VOLUME && inst.action !== ACTION_SEEK;
+}
+
+// Both the track key and the seek key read a player, so both keep a source
+// setting and both keep the poller alive.
+function isPlayerKey(inst) {
+  return !isVolume(inst);
+}
+
 function defaultSettings(action) {
   if (action === ACTION_VOLUME) {
     return { clickAction: 'mute', step: '5', showPercent: 'on' };
+  }
+  if (action === ACTION_SEEK) {
+    return { source: 'auto', clickAction: 'playPause', step: '10', background: 'plain' };
   }
   return { source: 'auto', clickAction: 'playPause', showText: 'on', showTime: 'on' };
 }
@@ -86,6 +105,16 @@ function renderForInstance(inst, nowMs = Date.now()) {
   const s = settingsOf(inst);
   const snap = SNAPSHOTS.get(s.source);
 
+  if (isSeek(inst)) {
+    if (snap && (snap.status === 'playing' || snap.status === 'paused')) {
+      return renderSeekInstance(inst, snap, nowMs);
+    }
+    // Falling through to the shared idle/error art, which doesn't dedupe —
+    // so the ring's last frame must not be able to suppress the first one it
+    // draws when a track comes back.
+    inst.lastIcon = null;
+  }
+
   if (!snap) {
     $UD.setBaseDataIcon(inst.context, renderIdle(sourceLabel(s.source)));
     return;
@@ -107,7 +136,7 @@ function renderForInstance(inst, nowMs = Date.now()) {
     title: snap.title,
     artist: snap.artist,
     artDataUrl: snap.artDataUrl || '',
-    positionMs: snap.positionMs,
+    positionMs: positionOf(s.source, nowMs),
     durationMs: snap.durationMs,
     playing: snap.playing,
     showText: s.showText !== 'off',
@@ -127,7 +156,7 @@ function renderAll() {
 // Whether this particular button has text long enough to scroll. Anything that
 // fits stays on the 1s tick, so the fast timer costs nothing in the common case.
 function instMarquees(inst) {
-  if (!inst.active || isVolume(inst)) return false;
+  if (!inst.active || !isTrack(inst)) return false;
   const s = settingsOf(inst);
   const snap = SNAPSHOTS.get(s.source);
   if (!snap || snap.status !== 'playing') return false;
@@ -186,9 +215,183 @@ function scheduleFrames() {
 function neededSources() {
   const set = new Set();
   for (const inst of INSTANCES.values()) {
-    if (inst.active && !isVolume(inst)) set.add(settingsOf(inst).source);
+    if (inst.active && isPlayerKey(inst)) set.add(settingsOf(inst).source);
   }
   return set;
+}
+
+// ---------------------------------------------------------------------------
+// Seeking
+//
+// `set player position` costs the same ~200ms process start every other
+// osascript write does, and a dial can produce a dozen detents in that time. So
+// the dial only moves a local target and repaints immediately; the write is
+// coalesced and the target is what the keys show until the player catches up.
+// Same shape as the volume guard below, with one extra wrinkle: the target is
+// an anchor rather than a value, because a playing track keeps moving while we
+// hold it.
+
+// Per source *setting* key, matching SNAPSHOTS: `{ positionMs, at, playing,
+// until, deltaMs, flashUntil }`. `positionMs` is where the track was at `at`.
+const SEEK_WANTED = new Map();
+const SEEK_TIMERS = new Map();
+// How long the target may disagree with the player before the player wins. A
+// seek that silently failed should not freeze the ring indefinitely.
+const SEEK_GUARD_MS = 3000;
+// How far off a reading may be and still count as "the seek landed". One poll
+// interval plus the write's own round trip.
+const SEEK_SETTLE_MS = 1600;
+// Coalescing window for a burst of dial detents.
+const SEEK_APPLY_MS = 90;
+// How long the ±Ns badge stays up after the last detent.
+const SEEK_FLASH_MS = 900;
+
+// Per source, so two keys seeking two different players don't cancel each
+// other's badge.
+const FLASH_TIMERS = new Map();
+
+function clampMs(ms, max) {
+  return Math.min(max, Math.max(0, Math.round(ms)));
+}
+
+// Where the track actually is now, as opposed to where the last poll found it.
+// A reading is only true as of its own capturedAt, and between two polls a
+// playing track has moved on by the wall clock — without this the ring and the
+// clock would sit still for a second and then jump, and during a marquee they
+// would be redrawn a dozen times at the same stale position.
+function positionOf(sourceKey, nowMs = Date.now()) {
+  const snap = SNAPSHOTS.get(sourceKey);
+  if (!snap) return 0;
+  const max = snap.durationMs > 0 ? snap.durationMs : Number.MAX_SAFE_INTEGER;
+
+  const want = SEEK_WANTED.get(sourceKey);
+  const base = want || { positionMs: snap.positionMs, at: snap.capturedAt || nowMs, playing: snap.playing };
+  const drift = base.playing ? Math.max(0, nowMs - base.at) : 0;
+  return clampMs(base.positionMs + drift, max);
+}
+
+function seekFlash(sourceKey, nowMs = Date.now()) {
+  const want = SEEK_WANTED.get(sourceKey);
+  return want && nowMs < want.flashUntil ? want.deltaMs : 0;
+}
+
+function renderSeekInstance(inst, snap, nowMs) {
+  const s = settingsOf(inst);
+  const icon = renderSeek({
+    positionMs: positionOf(s.source, nowMs),
+    durationMs: snap.durationMs,
+    playing: snap.playing,
+    artDataUrl: s.background === 'cover' ? snap.artDataUrl || '' : '',
+    seekDeltaMs: seekFlash(s.source, nowMs),
+  });
+  // The clock only changes once a second, so most repaints have nothing new to
+  // say — and every one of them is a full-size icon on the socket the marquee
+  // is competing for.
+  if (icon === inst.lastIcon) return;
+  inst.lastIcon = icon;
+  $UD.setBaseDataIcon(inst.context, icon);
+}
+
+// Everything watching one player, after that player's position moved.
+function renderSourceAll(sourceKey) {
+  const nowMs = Date.now();
+  for (const inst of INSTANCES.values()) {
+    if (inst.active && isPlayerKey(inst) && settingsOf(inst).source === sourceKey) {
+      renderForInstance(inst, nowMs);
+    }
+  }
+}
+
+// The badge expiring is a change nothing else will repaint: on a paused track
+// the next poll is up to three seconds away.
+function scheduleFlashClear(sourceKey) {
+  clearTimeout(FLASH_TIMERS.get(sourceKey));
+  FLASH_TIMERS.set(sourceKey, setTimeout(() => {
+    FLASH_TIMERS.delete(sourceKey);
+    renderSourceAll(sourceKey);
+  }, SEEK_FLASH_MS + 60));
+}
+
+function applySeekSoon(sourceKey) {
+  if (SEEK_TIMERS.has(sourceKey)) return;
+  SEEK_TIMERS.set(sourceKey, setTimeout(async () => {
+    SEEK_TIMERS.delete(sourceKey);
+    const want = SEEK_WANTED.get(sourceKey);
+    if (!want) return;
+
+    // Re-anchor to this instant before writing, so what the player is told and
+    // what the key is showing are the same number rather than one drifting a
+    // coalescing window behind the other.
+    const now = Date.now();
+    const target = positionOf(sourceKey, now);
+    SEEK_WANTED.set(sourceKey, { ...want, positionMs: target, at: now, until: now + SEEK_GUARD_MS });
+
+    const snap = SNAPSHOTS.get(sourceKey);
+    // "auto" resolves to whichever player the snapshot came from, same as a click.
+    const player = sourceKey === 'auto' ? snap?.source : sourceKey;
+    if (!player) return;
+    try {
+      await seekTo(player, target);
+    } catch (e) {
+      log('seek failed', e?.message);
+      SEEK_WANTED.delete(sourceKey);
+    }
+  }, SEEK_APPLY_MS));
+}
+
+// `absoluteMs` sets the position outright where a delta would only nudge it.
+// "Back to the start" as a relative move would be minus-wherever-we-are, and
+// the two readings of the clock are not the same instant — it would land a few
+// milliseconds short of zero rather than at it.
+function seekMove(sourceKey, deltaMs, absoluteMs = null) {
+  const snap = SNAPSHOTS.get(sourceKey);
+  if (!snap || (snap.status !== 'playing' && snap.status !== 'paused')) return;
+  if (!(snap.durationMs > 0)) return;
+
+  const now = Date.now();
+  const prev = SEEK_WANTED.get(sourceKey);
+  const from = positionOf(sourceKey, now);
+  const positionMs = clampMs(absoluteMs === null ? from + deltaMs : absoluteMs, snap.durationMs);
+  // The badge counts the whole burst, not the last detent: turning the dial
+  // three clicks should read "+30s", not "+10s" three times.
+  const carried = prev && now < prev.flashUntil ? prev.deltaMs : 0;
+
+  SEEK_WANTED.set(sourceKey, {
+    positionMs,
+    at: now,
+    playing: !!snap.playing,
+    trackId: snap.trackId,
+    until: now + SEEK_GUARD_MS,
+    deltaMs: carried + (positionMs - from),
+    flashUntil: now + SEEK_FLASH_MS,
+  });
+
+  renderSourceAll(sourceKey);
+  scheduleFlashClear(sourceKey);
+  applySeekSoon(sourceKey);
+}
+
+function seekBy(sourceKey, deltaMs) {
+  seekMove(sourceKey, deltaMs);
+}
+
+function seekToStart(sourceKey) {
+  seekMove(sourceKey, 0, 0);
+}
+
+// Called with each fresh reading: once the player reports a position near the
+// one we asked for, the target has served its purpose and the player gets the
+// last word again. Past the deadline it does anyway — the write may have failed,
+// or the track may have been changed from somewhere else.
+function reconcileSeek(sourceKey, snap) {
+  const want = SEEK_WANTED.get(sourceKey);
+  if (!want) return;
+
+  const changedTrack = snap.trackId && want.trackId && snap.trackId !== want.trackId;
+  const expected = want.positionMs + (want.playing ? Math.max(0, (snap.capturedAt || Date.now()) - want.at) : 0);
+  const settled = Math.abs(snap.positionMs - expected) <= SEEK_SETTLE_MS;
+
+  if (changedTrack || settled || Date.now() >= want.until) SEEK_WANTED.delete(sourceKey);
 }
 
 // ---------------------------------------------------------------------------
@@ -345,12 +548,16 @@ async function pollOnce() {
         snap.artDataUrl = await getArtwork(snap);
       }
 
+      reconcileSeek(sourceId, snap);
       SNAPSHOTS.set(sourceId, snap);
     }));
 
     // Drop snapshots for sources nobody watches anymore.
     for (const key of [...SNAPSHOTS.keys()]) {
-      if (!sources.has(key)) SNAPSHOTS.delete(key);
+      if (!sources.has(key)) {
+        SNAPSHOTS.delete(key);
+        SEEK_WANTED.delete(key);
+      }
     }
   } catch (e) {
     log('poll failed', e?.message);
@@ -383,6 +590,7 @@ function syncPolling() {
   if (neededSources().size === 0) {
     stopTicking();
     SNAPSHOTS.clear();
+    SEEK_WANTED.clear();
     return;
   }
   scheduleTick();
@@ -441,13 +649,19 @@ $UD.onDidReceiveSettings((msg) => {
   ensureInstance(msg.context, settings);
 });
 
-$UD.onRun(async (msg) => {
-  const inst = ensureInstance(msg.context, msg.param || {});
+// Shared by a key press and a dial press: pressing the dial should do whatever
+// clicking the same key does.
+async function runAction(inst) {
   const s = settingsOf(inst);
   if (s.clickAction === 'none') return;
 
   if (isVolume(inst)) {
     await volumeAction(inst, s.clickAction);
+    return;
+  }
+
+  if (isSeek(inst) && s.clickAction === 'restart') {
+    seekToStart(s.source);
     return;
   }
 
@@ -464,23 +678,34 @@ $UD.onRun(async (msg) => {
   }
   // Give the player a beat to apply the command before repainting the key.
   setTimeout(pollOnce, 250);
-});
+}
+
+$UD.onRun((msg) => runAction(ensureInstance(msg.context, msg.param || {})));
 
 // A dial spins far faster than osascript can be started, so every tick only
 // moves the local target and repaints — the write itself is coalesced.
 $UD.onDialRotate((msg) => {
   const inst = ensureInstance(msg.context, msg.param || {});
-  if (!isVolume(inst)) return;
-  const step = Number(settingsOf(inst).step) || 5;
+  const s = settingsOf(inst);
   const left = msg.rotateEvent === 'left' || msg.rotateEvent === 'hold-left';
   // The deck reports how many detents the dial moved when it batches them.
   const ticks = Math.max(1, Math.abs(Number(msg.ticks ?? msg.param?.ticks) || 1));
-  adjustVolume((left ? -step : step) * ticks);
+
+  if (isSeek(inst)) {
+    const step = (Number(s.step) || 10) * 1000;
+    seekBy(s.source, (left ? -step : step) * ticks);
+    return;
+  }
+  if (!isVolume(inst)) return;
+  adjustVolume(((left ? -1 : 1) * (Number(s.step) || 5)) * ticks);
 });
 
 $UD.onDialDown((msg) => {
   const inst = ensureInstance(msg.context, msg.param || {});
-  if (isVolume(inst)) toggleMute();
+  // Mute is the volume dial's press regardless of what its click is set to —
+  // that is the gesture the key has shipped with.
+  if (isVolume(inst)) return void toggleMute();
+  runAction(inst);
 });
 
 $UD.onSetActive((msg) => {

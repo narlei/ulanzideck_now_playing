@@ -4,6 +4,44 @@ All notable changes to this plugin. Versions follow the `Version` field in
 `com.narlei.nowplaying.ulanziPlugin/manifest.json`, and the release workflow
 publishes the section matching that version as the GitHub Release body.
 
+## [1.2.0] - 2026-09-09
+
+### Added
+
+- **Progress** action: the current track's progress drawn as a ring, with the
+  elapsed time in the middle and the track length underneath. Green while
+  playing, grey while paused, and `h:mm:ss` once a track runs past an hour.
+- **Seek from a dial** (`Encoder`): turning it jumps forward or back through the
+  track. The ring and the clock move with your hand and the player catches up —
+  a burst of detents is coalesced into one `set player position`, and the `+30s`
+  badge counts the whole burst rather than the last detent.
+- Settings for the position key: player, seek step (5 / 10 / 15 / 30s / 1min),
+  click and dial-press action (including **Back to the start**), and whether the
+  album cover sits dimmed behind the ring.
+- Pressing a dial now runs whatever the key's click action is, on every action
+  that has one. (The volume dial still mutes on press, as it always has.)
+
+### Changed
+
+- The volume action is now called **Volume** rather than **System Volume**. The
+  key's caption in Ulanzi Studio is the action's name, and it had ten characters
+  of room — "System Volume" arrived as "System Vol". Nothing a plugin can set:
+  the caption lives in the profile as a per-key `Name` with `LinkedTitle`, and
+  the SDK has no title event at all.
+- Every position on screen — the ring, the progress bar and the elapsed/duration
+  row — is now advanced from its reading's own timestamp instead of being shown
+  raw. A poll that took most of a second to come back was describing a track
+  that had already moved on, and during a marquee the same reading was redrawn a
+  dozen times at the same stale position.
+
+### Notes
+
+- **Upgrading:** a Volume key you already placed keeps the caption it was given
+  when you placed it. Remove and re-add the key to pick up the shorter name.
+- Seeking is a write to the same `player position` both Spotify and Apple Music
+  expose for reading, in whole seconds — Spotify takes a real happily, but
+  Music's property is an integer in some versions.
+
 ## [1.1.0] - 2026-08-26
 
 ### Added

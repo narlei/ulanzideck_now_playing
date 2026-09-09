@@ -54,11 +54,15 @@ tell application "Music"
 end tell`);
 
 function parseReadResult(raw, sourceId) {
-  if (raw === 'NOTRUNNING') return { status: 'not-running', source: sourceId };
-  if (raw === 'NOTRACK') return { status: 'no-track', source: sourceId };
+  // When the reading was taken. The position it carries is only true as of this
+  // instant, and a playing track has moved on by the time the next poll lands —
+  // callers advance it from here rather than showing a second-old number.
+  const capturedAt = Date.now();
+  if (raw === 'NOTRUNNING') return { status: 'not-running', source: sourceId, capturedAt };
+  if (raw === 'NOTRACK') return { status: 'no-track', source: sourceId, capturedAt };
 
   const parts = raw.split(SEP);
-  if (parts[0] !== 'OK' || parts.length < 9) return { status: 'no-track', source: sourceId };
+  if (parts[0] !== 'OK' || parts.length < 9) return { status: 'no-track', source: sourceId, capturedAt };
 
   const [, state, trackId, title, artist, album, durationMs, positionMs, artworkUrl] = parts;
   const playing = state === 'playing';
@@ -73,6 +77,7 @@ function parseReadResult(raw, sourceId) {
     durationMs: Number(durationMs) || 0,
     positionMs: Number(positionMs) || 0,
     artworkUrl: artworkUrl || '',
+    capturedAt,
   };
 }
 
@@ -81,7 +86,7 @@ export async function readSource(sourceId) {
   try {
     return parseReadResult(await osascript(script), sourceId);
   } catch (e) {
-    return { status: 'error', source: sourceId, message: e?.message || 'osascript failed' };
+    return { status: 'error', source: sourceId, message: e?.message || 'osascript failed', capturedAt: Date.now() };
   }
 }
 
@@ -111,4 +116,15 @@ export async function sendCommand(sourceId, command) {
   const verb = COMMANDS[command];
   if (!src || !verb) return;
   await osascript(runningGuard(src.app, `tell application "${src.app}" to ${verb}`));
+}
+
+// Seeking is a write to the same `player position` both apps expose for
+// reading, in seconds. Whole seconds only: Spotify takes a real happily but
+// Music's property is an integer in some versions, and at a 5s minimum step the
+// rounding is invisible either way.
+export async function seekTo(sourceId, positionMs) {
+  const src = SOURCES[sourceId];
+  if (!src) return;
+  const seconds = Math.max(0, Math.round(positionMs / 1000));
+  await osascript(runningGuard(src.app, `tell application "${src.app}" to set player position to ${seconds}`));
 }
